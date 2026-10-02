@@ -1,37 +1,62 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Lock, ArrowRight, Activity, Check } from 'lucide-react';
 import { Button, Input } from '../components/ui';
 import { useAuth, useToast } from '../context/AppContext';
 
+const REMEMBER_KEY = 'mc_remember_email';
+
 export default function Login() {
   const { login } = useAuth();
   const nav = useNavigate();
   const { push } = useToast();
-  const [email, setEmail] = useState('amelia.hart@medicareplus.com');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('Password123');
   const [show, setShow] = useState(false);
   const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
+  useEffect(() => {
+    const savedEmail = localStorage.getItem(REMEMBER_KEY);
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setPassword('Password123');
+    } else {
+      setEmail('amelia.hart@medicareplus.com');
+    }
+  }, []);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     const errs: typeof errors = {};
+
     if (!email) errs.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) errs.email = 'Enter a valid email';
+
     if (!password) errs.password = 'Password is required';
     else if (password.length < 6) errs.password = 'At least 6 characters';
+
     setErrors(errs);
     if (Object.keys(errs).length) return;
+
     setLoading(true);
     try {
       await login(email, password);
+
+      if (remember) {
+        localStorage.setItem(REMEMBER_KEY, email);
+      } else {
+        localStorage.removeItem(REMEMBER_KEY);
+      }
+
       push({ type: 'success', message: 'Welcome back! Redirecting...' });
       setTimeout(() => nav('/app'), 500);
     } catch {
       push({ type: 'error', message: 'Invalid credentials. Try again.' });
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -112,7 +137,7 @@ export default function Login() {
               />
               <button
                 type="button"
-                onClick={() => setShow(!show)}
+                onClick={() => setShow((v) => !v)}
                 className="absolute right-3 top-[38px] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
                 aria-label="Toggle password"
               >
@@ -122,7 +147,12 @@ export default function Login() {
 
             <div className="flex items-center justify-between">
               <label className="inline-flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 rounded border-[var(--border-strong)] accent-[var(--primary)]" />
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                  className="h-4 w-4 rounded border-[var(--border-strong)] accent-[var(--primary)]"
+                />
                 <span className="caption text-[var(--text-secondary)]">Remember me</span>
               </label>
               <a href="#" className="caption font-semibold text-[var(--primary)] hover:underline">Forgot password?</a>

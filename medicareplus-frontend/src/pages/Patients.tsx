@@ -1,9 +1,23 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Search, Plus, Download, Filter, Mail, Phone, MapPin, Calendar, Droplet, Edit, Printer, ArrowLeft, Activity, Pill, TestTube2, Receipt } from 'lucide-react';
-import { PageHeader, Button, Input, Select, Card, Avatar, Badge, StatusBadge, TableWrapper, Th, Td, IconButton, EmptyState } from '../components/ui';
-import { patients as allPatients } from '../data/mockData';
+import { Search, Plus, Download, Filter, Mail, Phone, MapPin, Calendar, Droplet, Edit, Printer, ArrowLeft, Activity, Pill, TestTube2, Receipt, Loader } from 'lucide-react';
+import { PageHeader, Button, Input, Select, Card, Avatar, Badge, StatusBadge, TableWrapper, Th, Td, IconButton, EmptyState, Skeleton } from '../components/ui';
 import { useToast } from '../context/AppContext';
+import { useApi } from '../hooks/useApi';
+import { patientService } from '../services/api';
+
+type Patient = {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  gender: 'Male' | 'Female';
+  age: number;
+  blood: string;
+  address: string;
+  status: 'Active' | 'Inactive';
+  lastVisit: string;
+};
 
 export function PatientsList() {
   const [search, setSearch] = useState('');
@@ -12,19 +26,27 @@ export function PatientsList() {
   const nav = useNavigate();
   const { push } = useToast();
 
-  const filtered = useMemo(() => allPatients.filter((p) => {
-    const q = search.toLowerCase();
-    const matchQ = !q || p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || p.phone.includes(q);
-    const matchG = !gender || p.gender === gender;
-    const matchS = !status || p.status === status;
-    return matchQ && matchG && matchS;
-  }), [search, gender, status]);
+  const { data: allPatients = [], isLoading, error } = useApi(
+    () => patientService.list().catch(() => []),
+    []
+  );
+
+  const filtered = useMemo(() => {
+    if (!allPatients.length) return [];
+    return allPatients.filter((p: any) => {
+      const q = search.toLowerCase();
+      const matchQ = !q || p.name?.toLowerCase().includes(q) || p.id?.toLowerCase().includes(q) || p.phone?.includes(q);
+      const matchG = !gender || p.gender === gender;
+      const matchS = !status || p.status === status;
+      return matchQ && matchG && matchS;
+    });
+  }, [allPatients, search, gender, status]);
 
   return (
     <div>
       <PageHeader
         title="Patients"
-        subtitle={`${allPatients.length} total patients · ${allPatients.filter(p => p.status === 'Active').length} active`}
+        subtitle={`${allPatients.length} total patients · ${allPatients.filter((p: any) => p.status === 'Active').length} active`}
         actions={<>
           <Button variant="outline"><Download className="h-4 w-4" /> Export</Button>
           <Button onClick={() => push({ type: 'success', message: 'Patient form opened.' })}><Plus className="h-4 w-4" /> Add Patient</Button>
@@ -43,7 +65,10 @@ export function PatientsList() {
       </Card>
 
       <Card className="p-0 overflow-hidden">
-        {filtered.length === 0 ? (
+        {error && <EmptyState title="Failed to load patients" description="Please check your connection and try again." />}
+        {isLoading ? (
+          <div className="p-6 space-y-4">{Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} className="h-16" />)}</div>
+        ) : filtered.length === 0 ? (
           <EmptyState title="No patients found" description="Try changing your search or add a new patient." action={<Button>Add Patient</Button>} />
         ) : (
           <TableWrapper>
@@ -59,7 +84,7 @@ export function PatientsList() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => (
+              {filtered.map((p: any) => (
                 <tr key={p.id} className="hover:bg-[var(--surface-2)] transition-colors cursor-pointer" onClick={() => nav(`/app/patients/${p.id}`)}>
                   <Td>
                     <div className="flex items-center gap-3">
@@ -89,11 +114,31 @@ export function PatientsList() {
 }
 
 export function PatientProfile() {
-  const { id } = useParams();
+  const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
-  const patient = allPatients.find((p) => p.id === id) || allPatients[0];
+  const { push } = useToast();
+  const [patient, setPatient] = useState<Patient | null>(null);
+  const [loading, setLoading] = useState(true);
   const tabs = ['Overview', 'Medical History', 'Appointments', 'Prescriptions', 'Laboratory', 'Billing'];
   const [tab, setTab] = useState('Overview');
+
+  useEffect(() => {
+    if (!id) return;
+    setLoading(true);
+    patientService
+      .get(id)
+      .then((data: any) => setPatient(data))
+      .catch(() => push({ type: 'error', message: 'Failed to load patient data' }))
+      .finally(() => setLoading(false));
+  }, [id, push]);
+
+  if (loading) {
+    return <div className="space-y-4">{Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-32" />)}</div>;
+  }
+
+  if (!patient) {
+    return <EmptyState title="Patient not found" description="The patient you're looking for doesn't exist." />;
+  }
 
   return (
     <div>
@@ -127,11 +172,13 @@ export function PatientProfile() {
 
       <div className="flex gap-1 border-b border-[var(--border)] mb-5 overflow-x-auto">
         {tabs.map((t) => (
-          <button key={t} onClick={() => setTab(t)} className={`px-4 py-3 caption font-semibold whitespace-nowrap border-b-2 transition-colors ${tab === t ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>{t}</button>
+          <button key={t} onClick={() => setTab(t)} className={`px-4 py-3 caption font-semibold whitespace-nowrap border-b-2 transition-colors ${tab === t ? 'border-[var(--primary)] text-[var(--primary)]' : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}`}>
+            {t}
+          </button>
         ))}
       </div>
 
-      {tab === 'Overview' && (
+      {tab === 'Overview' ? (
         <div className="grid lg:grid-cols-3 gap-4">
           <Card className="lg:col-span-2">
             <h3 className="h3 mb-4">Vital Signs</h3>
@@ -150,33 +197,13 @@ export function PatientProfile() {
             </div>
           </Card>
           <Card>
-            <h3 className="h3 mb-4">Medical Summary</h3>
-            <div className="space-y-3">
-              <div><p className="caption text-[var(--text-muted)] font-semibold">Allergies</p><div className="flex flex-wrap gap-1.5 mt-1.5"><Badge variant="danger">Penicillin</Badge><Badge variant="danger">Nuts</Badge></div></div>
-              <div><p className="caption text-[var(--text-muted)] font-semibold">Conditions</p><div className="flex flex-wrap gap-1.5 mt-1.5"><Badge variant="warning">Hypertension</Badge></div></div>
-              <div><p className="caption text-[var(--text-muted)] font-semibold">Current Medication</p><div className="flex flex-wrap gap-1.5 mt-1.5"><Badge variant="info">Amlodipine 5mg</Badge></div></div>
-            </div>
-          </Card>
-          <Card className="lg:col-span-3">
-            <h3 className="h3 mb-4">Recent Activity</h3>
-            <div className="space-y-3">
-              {[
-                { icon: Activity, t: 'Consultation with Dr. Amelia Hart', d: 'Cardiology · General checkup', time: 'Jan 20, 2026' },
-                { icon: Pill, t: 'Prescription issued', d: 'Amlodipine 5mg · 30 tablets', time: 'Jan 20, 2026' },
-                { icon: TestTube2, t: 'Lab test: Lipid Profile', d: 'Results: Normal', time: 'Jan 15, 2026' },
-                { icon: Receipt, t: 'Invoice #INV-8801 paid', d: '$85.00 via Card', time: 'Jan 15, 2026' },
-              ].map((a, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 rounded-[var(--radius)] hover:bg-[var(--surface-2)] transition-colors">
-                  <div className="h-9 w-9 rounded-full bg-[var(--primary-50)] text-[var(--primary)] inline-flex items-center justify-center shrink-0"><a.icon className="h-4 w-4" /></div>
-                  <div className="flex-1"><p className="body font-semibold">{a.t}</p><p className="caption text-[var(--text-muted)]">{a.d}</p></div>
-                  <span className="caption text-[var(--text-muted)] whitespace-nowrap">{a.time}</span>
-                </div>
-              ))}
-            </div>
+            <h3 className="h3 mb-4">Status</h3>
+            <p className="body text-[var(--text-secondary)]">Patient data loaded from backend. Additional medical history and documents are available in the Medical History tab.</p>
           </Card>
         </div>
+      ) : (
+        <Card><EmptyState title={`${tab} coming soon`} description={`Full ${tab.toLowerCase()} records will be available once fully integrated with the backend.`} /></Card>
       )}
-      {tab !== 'Overview' && <Card><EmptyState title={`${tab} coming soon`} description={`Full ${tab.toLowerCase()} records will be available once connected to the backend.`} /></Card>}
     </div>
   );
 }

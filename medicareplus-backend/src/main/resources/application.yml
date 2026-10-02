@@ -35,6 +35,11 @@ app:
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   seed:
     enabled: ${SEED_DEMO_DATA:true}
+  security:
+    rate-limit:
+      enabled: ${RATE_LIMIT_ENABLED:true}
+      requests-per-minute: ${RATE_LIMIT_REQUESTS_PER_MINUTE:10}
+      window-seconds: ${RATE_LIMIT_WINDOW_SECONDS:60}
 
 logging:
   level:
