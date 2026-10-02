@@ -1,40 +1,76 @@
-// ============================================================
-//  API Service — Spring Boot ready
-//  Base URL is injected via Vite env: VITE_API_BASE_URL
-// ============================================================
+const APP_STORAGE_KEYS = {
+  token: 'mc_token',
+  user: 'mc_user',
+} as const;
 
-const BASE = (import.meta as any).env?.VITE_API_BASE_URL || 'http://localhost:8080/api';
+const BASE = (import.meta as any).env?.VITE_API_BASE_URL?.replace(/\/+$/, '') || 'http://localhost:8080/api';
 
 type RequestOptions = RequestInit & { params?: Record<string, string | number> };
 
+async function parseResponse<T>(res: Response): Promise<T> {
+  if (res.status === 204) return null as T;
+
+  const contentType = res.headers.get('content-type') ?? '';
+  const rawText = await res.text();
+
+  if (!rawText) return null as T;
+
+  if (contentType.includes('application/json')) {
+    try {
+      return JSON.parse(rawText) as T;
+    } catch {
+      return rawText as unknown as T;
+    }
+  }
+
+  return rawText as unknown as T;
+}
+
 async function request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const token = localStorage.getItem('mc_token');
+  const token = localStorage.getItem(APP_STORAGE_KEYS.token);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
 
   let url = `${BASE}${endpoint}`;
   if (options.params) {
     const qs = new URLSearchParams();
-    Object.entries(options.params).forEach(([k, v]) => qs.append(k, String(v)));
+    Object.entries(options.params).forEach(([key, value]) => qs.append(key, String(value)));
     url += `?${qs.toString()}`;
   }
 
-  const res = await fetch(url, { ...options, headers });
-  if (res.status === 401) {
-    localStorage.removeItem('mc_token');
-    localStorage.removeItem('mc_user');
-    window.location.href = '/login';
-    throw new Error('Unauthorized');
+  try {
+    const res = await fetch(url, { ...options, headers });
+
+    if (res.status === 401) {
+      localStorage.removeItem(APP_STORAGE_KEYS.token);
+      localStorage.removeItem(APP_STORAGE_KEYS.user);
+      window.location.assign('/login');
+      throw new Error('Unauthorized');
+    }
+
+    if (!res.ok) {
+      const errorText = await parseResponse<string>(res);
+      throw new Error(typeof errorText === 'string' ? errorText : `Request failed (${res.status})`);
+    }
+
+    return await parseResponse<T>(res);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'Unauthorized') {
+      throw error;
+    }
+
+    if (error instanceof Error) {
+      throw error;
+    }
+
+    throw new Error('Network request failed');
   }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  if (res.status === 204) return null as unknown as T;
-  return res.json();
 }
 
 export const api = {

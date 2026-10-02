@@ -9,9 +9,15 @@ import {
 
 import { authService } from '../services/api';
 
+const STORAGE_KEYS = {
+  user: 'mc_user',
+  token: 'mc_token',
+  theme: 'mc_theme',
+} as const;
+
 /* ========================================================================
    Auth
-======================================================================== */
+======================================================================= */
 
 export type Role =
   | 'ADMIN'
@@ -42,7 +48,7 @@ const AuthContext = createContext<AuthCtx | null>(null);
 
 /* ========================================================================
    Theme
-======================================================================== */
+======================================================================= */
 
 type ThemeCtx = {
   theme: 'light' | 'dark';
@@ -53,7 +59,7 @@ const ThemeContext = createContext<ThemeCtx | null>(null);
 
 /* ========================================================================
    Toast
-======================================================================== */
+======================================================================= */
 
 type Toast = {
   id: number;
@@ -71,7 +77,7 @@ const ToastContext = createContext<ToastCtx | null>(null);
 
 /* ========================================================================
    Sidebar
-======================================================================== */
+======================================================================= */
 
 type SidebarCtx = {
   open: boolean;
@@ -81,13 +87,13 @@ type SidebarCtx = {
 const SidebarContext = createContext<SidebarCtx | null>(null);
 
 /* ========================================================================
-   Provider
-======================================================================== */
+    Provider
+======================================================================= */
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(() => {
     try {
-      const raw = localStorage.getItem('mc_user');
+      const raw = localStorage.getItem(STORAGE_KEYS.user);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -95,108 +101,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem('mc_theme');
-
+    const saved = localStorage.getItem(STORAGE_KEYS.theme);
     return saved === 'dark' ? 'dark' : 'light';
   });
 
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [open, setOpen] = useState(false);
 
-  /* ----------------------------------------------------------------------
-     Theme
-  ---------------------------------------------------------------------- */
-
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('mc_theme', theme);
+    localStorage.setItem(STORAGE_KEYS.theme, theme);
   }, [theme]);
 
-  /* ----------------------------------------------------------------------
-     LOGIN — REAL SPRING BOOT LOGIN
-  ---------------------------------------------------------------------- */
-
   const login = useCallback(async (email: string, password: string) => {
-    const response = await authService.login(email, password);
+    try {
+      const response = await authService.login(email, password);
 
-    /*
-     * Backend returns:
-     *
-     * {
-     *   token: "...",
-     *   user: {
-     *     id: 1,
-     *     name: "Dr. Amelia Hart",
-     *     email: "...",
-     *     role: "ADMIN",
-     *     status: "ACTIVE",
-     *     avatar: "DA"
-     *   }
-     * }
-     */
+      if (!response?.token || !response?.user) {
+        throw new Error('Invalid login response from server');
+      }
 
-    if (!response?.token || !response?.user) {
-      throw new Error('Invalid login response from server');
+      const backendUser = response.user as {
+        id: number;
+        name: string;
+        email: string;
+        role: Role;
+        status?: string;
+        avatar?: string;
+      };
+
+      const authenticatedUser: User = {
+        id: backendUser.id,
+        name: backendUser.name,
+        email: backendUser.email,
+        role: backendUser.role,
+        status: backendUser.status,
+        avatar: backendUser.avatar || getInitials(backendUser.name),
+      };
+
+      localStorage.setItem(STORAGE_KEYS.token, response.token);
+      localStorage.setItem(STORAGE_KEYS.user, JSON.stringify(authenticatedUser));
+      setUser(authenticatedUser);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login failed';
+      throw new Error(message);
     }
-
-    const backendUser = response.user as {
-      id: number;
-      name: string;
-      email: string;
-      role: Role;
-      status?: string;
-      avatar?: string;
-    };
-
-    const authenticatedUser: User = {
-      id: backendUser.id,
-      name: backendUser.name,
-      email: backendUser.email,
-      role: backendUser.role,
-      status: backendUser.status,
-      avatar: backendUser.avatar || getInitials(backendUser.name),
-    };
-
-    /*
-     * Save JWT token.
-     *
-     * api.ts will automatically read mc_token
-     * and send:
-     *
-     * Authorization: Bearer <token>
-     */
-    localStorage.setItem('mc_token', response.token);
-
-    /* Save authenticated user */
-    localStorage.setItem(
-      'mc_user',
-      JSON.stringify(authenticatedUser)
-    );
-
-    setUser(authenticatedUser);
   }, []);
-
-  /* ----------------------------------------------------------------------
-     LOGOUT
-  ---------------------------------------------------------------------- */
 
   const logout = useCallback(() => {
-    /*
-     * JWT is stateless.
-     * The backend logout endpoint does not invalidate
-     * the token, so removing it from the browser is enough
-     * for this implementation.
-     */
-
-    localStorage.removeItem('mc_token');
-    localStorage.removeItem('mc_user');
-
+    localStorage.removeItem(STORAGE_KEYS.token);
+    localStorage.removeItem(STORAGE_KEYS.user);
     setUser(null);
   }, []);
-
-  /* ----------------------------------------------------------------------
-     Toast
-  ---------------------------------------------------------------------- */
 
   const push = useCallback((t: Omit<Toast, 'id'>) => {
     const id = Date.now() + Math.random();
@@ -209,7 +165,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     ]);
 
-    setTimeout(() => {
+    window.setTimeout(() => {
       setToasts((s) => s.filter((x) => x.id !== id));
     }, 4000);
   }, []);
@@ -230,10 +186,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       <ThemeContext.Provider
         value={{
           theme,
-          toggle: () =>
-            setTheme((t) =>
-              t === 'light' ? 'dark' : 'light'
-            ),
+          toggle: () => setTheme((t) => (t === 'light' ? 'dark' : 'light')),
         }}
       >
         <ToastContext.Provider
@@ -257,10 +210,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 }
 
-/* ========================================================================
-   Helpers
-======================================================================== */
-
 function getInitials(name: string): string {
   if (!name || !name.trim()) {
     return '?';
@@ -273,10 +222,6 @@ function getInitials(name: string): string {
     .map((part) => part.charAt(0).toUpperCase())
     .join('');
 }
-
-/* ========================================================================
-   Hooks
-======================================================================== */
 
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
